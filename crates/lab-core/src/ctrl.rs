@@ -13,6 +13,17 @@ pub const DISCOVER_MS: u64 = 2000;
 pub const SYNC_MAX_PULSES: u16 = 1000;
 pub const SYNC_MIN_PERIOD_MS: u16 = 10;
 
+/// Bounds for a `SyncTest`, shared by the controller and a trigger-master peer.
+pub fn validate_sync(pulses: u16, period_ms: u16) -> Result<(), &'static str> {
+    if pulses == 0 || pulses > SYNC_MAX_PULSES {
+        Err("pulses must be 1..=1000")
+    } else if period_ms < SYNC_MIN_PERIOD_MS {
+        Err("period_ms must be >= 10")
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PeerState {
     pub hello: Option<Hello>,
@@ -154,16 +165,13 @@ impl Controller {
                 }
                 Err(_) => reply(&mut a, Err("config rejected by safety limits")),
             },
-            CmdBody::SyncTest { pulses, period_ms } => {
-                if pulses == 0 || pulses > SYNC_MAX_PULSES {
-                    reply(&mut a, Err("pulses must be 1..=1000"));
-                } else if period_ms < SYNC_MIN_PERIOD_MS {
-                    reply(&mut a, Err("period_ms must be >= 10"));
-                } else {
+            CmdBody::SyncTest { pulses, period_ms } => match validate_sync(pulses, period_ms) {
+                Ok(()) => {
                     reply(&mut a, Ok(()));
                     push(&mut a, Action::Pulse { pulses, period_ms });
                 }
-            }
+                Err(e) => reply(&mut a, Err(e)),
+            },
             CmdBody::Arm | CmdBody::Stop => reply(&mut a, Err("experiment runs land in M2")),
         }
         a

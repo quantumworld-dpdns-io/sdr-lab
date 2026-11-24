@@ -242,7 +242,9 @@ pub struct Log {
 /// Any message, tagged by the frame header's `msg_type`.
 // CsiFrame is held inline on purpose: firmware has no allocator on this path.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq)]
+// Serialize is for host-side JSON (dashboard). The wire format does not use
+// it: the frame header selects the type and only the inner struct is encoded.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Msg {
     Hello(Hello),
     Status(Status),

@@ -7,12 +7,23 @@ use crate::{ack, push, Action, Actions, Port, HEARTBEAT_MS};
 #[derive(Debug, Default)]
 pub struct Peer {
     last_heartbeat_ms: Option<u64>,
+    /// Drives the trigger line itself (host-link mode, where no controller
+    /// board exists). Then `SyncTest` is accepted and turned into pulses.
+    trigger_master: bool,
 }
 
 impl Peer {
     pub const fn new() -> Self {
         Self {
             last_heartbeat_ms: None,
+            trigger_master: false,
+        }
+    }
+
+    pub const fn trigger_master() -> Self {
+        Self {
+            last_heartbeat_ms: None,
+            trigger_master: true,
         }
     }
 
@@ -49,12 +60,32 @@ impl Peer {
                 push(&mut a, Action::SendHello(Port::Host));
                 push(&mut a, Action::SendStatus(Port::Host));
             }
-            CmdBody::Configure(_) | CmdBody::Arm | CmdBody::Stop | CmdBody::SyncTest { .. } => {
-                push(
-                    &mut a,
-                    Action::Send(Port::Host, ack(*cmd_id, Err("not supported by peer in M1"))),
-                )
+            CmdBody::SyncTest { pulses, period_ms } if self.trigger_master => {
+                match crate::ctrl::validate_sync(*pulses, *period_ms) {
+                    Ok(()) => {
+                        push(&mut a, Action::Send(Port::Host, ack(*cmd_id, Ok(()))));
+                        push(
+                            &mut a,
+                            Action::Pulse {
+                                pulses: *pulses,
+                                period_ms: *period_ms,
+                            },
+                        );
+                    }
+                    Err(e) => push(&mut a, Action::Send(Port::Host, ack(*cmd_id, Err(e)))),
+                }
             }
+            CmdBody::SyncTest { .. } => push(
+                &mut a,
+                Action::Send(
+                    Port::Host,
+                    ack(*cmd_id, Err("this board is not the trigger master")),
+                ),
+            ),
+            CmdBody::Configure(_) | CmdBody::Arm | CmdBody::Stop => push(
+                &mut a,
+                Action::Send(Port::Host, ack(*cmd_id, Err("not supported by peer in M1"))),
+            ),
         }
         a
     }
@@ -92,6 +123,38 @@ mod tests {
                 Action::SendHello(Port::Host),
                 Action::SendStatus(Port::Host)
             ]
+        );
+    }
+
+    #[test]
+    fn only_trigger_master_pulses() {
+        let st = Msg::Cmd(Cmd {
+            cmd_id: 3,
+            body: CmdBody::SyncTest {
+                pulses: 10,
+                period_ms: 100,
+            },
+        });
+        let a = Peer::new().on_msg(&st);
+        assert!(matches!(&a[..], [Action::Send(_, Msg::Ack(x))] if !x.ok));
+        let a = Peer::trigger_master().on_msg(&st);
+        assert!(matches!(&a[0], Action::Send(_, Msg::Ack(x)) if x.ok));
+        assert_eq!(
+            a[1],
+            Action::Pulse {
+                pulses: 10,
+                period_ms: 100
+            }
+        );
+        let bad = Msg::Cmd(Cmd {
+            cmd_id: 4,
+            body: CmdBody::SyncTest {
+                pulses: 0,
+                period_ms: 100,
+            },
+        });
+        assert!(
+            matches!(&Peer::trigger_master().on_msg(&bad)[..], [Action::Send(_, Msg::Ack(x))] if !x.ok)
         );
     }
 }

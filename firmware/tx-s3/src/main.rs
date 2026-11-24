@@ -1,7 +1,9 @@
-//! ESP32-S3 "TX" board. M1: link to CTRL, heartbeat, trigger timestamps.
+//! ESP32-S3 "TX" board. Status LED (WS2812, GPIO48) blinks blue while running.
 //!
-//! Wiring (docs/wiring.md): UART1 TX=GPIO17 → CTRL, RX=GPIO18 ← CTRL,
-//! trigger in = GPIO4. Status LED (WS2812, GPIO48) blinks blue while running.
+//! Default build — link to the controller board (docs/wiring.md):
+//!   UART1 TX=GPIO17 → CTRL, RX=GPIO18 ← CTRL; trigger in = GPIO4.
+//! `--features host-link` — link to the Mac over native USB, and act as the
+//!   trigger master: GPIO5 → own GPIO4 and RX GPIO4 (jumpers), shared GND.
 
 use esp_idf_svc::hal::peripherals::Peripherals;
 use lab_fw::board::BoardInfo;
@@ -19,5 +21,20 @@ fn main() -> anyhow::Result<()> {
         board: Board::Tx,
         chip: "esp32s3",
     };
-    lab_fw::peer::run(info, p.uart1, p.pins.gpio17, p.pins.gpio18, p.pins.gpio4)
+
+    #[cfg(feature = "host-link")]
+    let (link, rx, trigger_out) = {
+        let (link, rx) = lab_fw::link::usb_jtag::link(
+            "usb", p.usb_serial, p.pins.gpio19, p.pins.gpio20, info.board,
+        )?;
+        let out = lab_fw::trigger::TriggerOut::new(p.pins.gpio5)?;
+        (link, rx, Some(out))
+    };
+    #[cfg(not(feature = "host-link"))]
+    let (link, rx, trigger_out) = {
+        let (link, rx) = lab_fw::peer::uart_link(&info, p.uart1, p.pins.gpio17, p.pins.gpio18)?;
+        (link, rx, None)
+    };
+
+    lab_fw::peer::run(info, link, rx, p.pins.gpio4, trigger_out)
 }

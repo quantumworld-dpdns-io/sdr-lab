@@ -31,9 +31,37 @@ pub enum Event {
 
 pub struct Conn {
     pub path: String,
+    writer: ConnWriter,
+    rx: mpsc::Receiver<Event>,
+}
+
+/// Write half of a [`Conn`], usable from another thread after [`Conn::split`].
+pub struct ConnWriter {
     port: Box<dyn SerialPort>,
     tx: LinkTx,
-    rx: mpsc::Receiver<Event>,
+}
+
+impl ConnWriter {
+    pub fn send(&mut self, msg: &Msg) -> Result<()> {
+        let mut buf = [0u8; MAX_LINK_WIRE];
+        let n = self.tx.encode(msg, &mut buf)?;
+        self.port.write_all(&buf[..n])?;
+        self.port.flush()?;
+        Ok(())
+    }
+}
+
+/// All Espressif native-USB ports (ESP32-S3 USB-Serial-JTAG), cu.* only.
+pub fn espressif_ports() -> Result<Vec<String>> {
+    let mut out: Vec<String> = serialport::available_ports()
+        .context("listing serial ports")?
+        .into_iter()
+        .filter(|p| !p.port_name.starts_with("/dev/tty."))
+        .filter(|p| matches!(&p.port_type, SerialPortType::UsbPort(u) if u.vid == ESPRESSIF_VID))
+        .map(|p| p.port_name)
+        .collect();
+    out.sort();
+    Ok(out)
 }
 
 /// Pick the controller port: an explicit path, else the only USB-UART bridge.
@@ -83,8 +111,12 @@ pub fn find_port(explicit: Option<&str>) -> Result<String> {
 }
 
 impl Conn {
+    /// Open the controller port (explicit path, else auto-detected bridge).
     pub fn open(explicit: Option<&str>) -> Result<Self> {
-        let path = find_port(explicit)?;
+        Self::open_path(find_port(explicit)?)
+    }
+
+    pub fn open_path(path: String) -> Result<Self> {
         let mut port = serialport::new(&path, BAUD)
             .timeout(Duration::from_millis(50))
             .open()
@@ -125,18 +157,20 @@ impl Conn {
         });
         Ok(Self {
             path,
-            port,
-            tx: LinkTx::new(Board::Host),
+            writer: ConnWriter {
+                port,
+                tx: LinkTx::new(Board::Host),
+            },
             rx: erx,
         })
     }
 
     pub fn send(&mut self, msg: &Msg) -> Result<()> {
-        let mut buf = [0u8; MAX_LINK_WIRE];
-        let n = self.tx.encode(msg, &mut buf)?;
-        self.port.write_all(&buf[..n])?;
-        self.port.flush()?;
-        Ok(())
+        self.writer.send(msg)
+    }
+
+    pub fn split(self) -> (String, ConnWriter, mpsc::Receiver<Event>) {
+        (self.path, self.writer, self.rx)
     }
 
     pub fn recv_until(&self, deadline: Instant) -> Option<Event> {

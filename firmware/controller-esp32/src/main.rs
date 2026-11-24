@@ -105,9 +105,9 @@ fn main() -> Result<()> {
     // with respect to our frame writes (no mid-frame interleaving).
     // SAFETY: the UART0 driver was installed just above.
     unsafe { esp_idf_svc::sys::uart_vfs_dev_use_driver(0) };
-    let (host, host_rx) = Link::new("host", host_uart, Board::Ctrl);
-    let (tx, tx_rx) = Link::new("tx", uart(p.uart1, p.pins.gpio25, p.pins.gpio26)?, Board::Ctrl);
-    let (rx, rx_rx) = Link::new("rx", uart(p.uart2, p.pins.gpio17, p.pins.gpio16)?, Board::Ctrl);
+    let (host, host_rx) = Link::uart("host", host_uart, Board::Ctrl);
+    let (tx, tx_rx) = Link::uart("tx", uart(p.uart1, p.pins.gpio25, p.pins.gpio26)?, Board::Ctrl);
+    let (rx, rx_rx) = Link::uart("rx", uart(p.uart2, p.pins.gpio17, p.pins.gpio16)?, Board::Ctrl);
     let mut trigger = TriggerOut::new(p.pins.gpio27)?;
 
     let (pulse_tx, pulse_rx) = mpsc::sync_channel::<(u16, u16)>(1);

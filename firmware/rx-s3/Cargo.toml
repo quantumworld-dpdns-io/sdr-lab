@@ -14,3 +14,8 @@ anyhow.workspace = true
 
 [build-dependencies]
 embuild.workspace = true
+
+[features]
+default = []
+# Link to the Mac over native USB instead of UART to the controller board.
+host-link = ["lab-fw/usb-jtag"]

@@ -11,3 +11,7 @@ esp-idf-svc.workspace = true
 log.workspace = true
 anyhow.workspace = true
 heapless = "0.8"
+
+[features]
+# ESP32-S3 native USB-Serial-JTAG link (host-link mode). S3 only.
+usb-jtag = []
