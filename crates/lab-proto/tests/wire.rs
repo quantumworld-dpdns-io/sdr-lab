@@ -150,6 +150,14 @@ fn sample_messages() -> Vec<Msg> {
         Msg::TriggerEvt(TriggerEvt {
             exp_id: 1,
             t0_local_us: u64::MAX,
+            edge: 7,
+        }),
+        Msg::Cmd(Cmd {
+            cmd_id: 7,
+            body: CmdBody::SyncTest {
+                pulses: 20,
+                period_ms: 100,
+            },
         }),
         Msg::TxRecord(TxRecord {
             exp_id: 1,
@@ -226,4 +234,45 @@ fn every_message_roundtrips_through_the_wire() {
 fn unknown_msg_type_rejected() {
     let hdr = Header::new(200, 1, 0);
     assert_eq!(Msg::from_frame(&hdr, &[]), Err(Error::UnknownType(200)));
+}
+
+#[test]
+fn link_tx_prefix_recovers_from_console_text_and_forwarding_is_verbatim() {
+    use lab_proto::link::{reframe, MAX_LINK_WIRE};
+    let mut tx = LinkTx::new(Board::Tx);
+    let ping = Msg::Cmd(Cmd {
+        cmd_id: 1,
+        body: CmdBody::Ping,
+    });
+    // Console text with no trailing delimiter, then two frames.
+    let mut line = b"I (123) boot: hello\r\n".to_vec();
+    for _ in 0..2 {
+        let mut buf = [0u8; MAX_LINK_WIRE];
+        let n = tx.encode(&ping, &mut buf).unwrap();
+        line.extend_from_slice(&buf[..n]);
+    }
+    let mut rx = RxDecoder::new();
+    let (mut ok, mut garbage, mut forwarded) = (Vec::new(), Vec::new(), Vec::new());
+    for b in line {
+        let Some(r) = rx.feed(b) else { continue };
+        match r {
+            Ok((h, _)) => {
+                ok.push(h.seq);
+                let mut out = [0u8; MAX_LINK_WIRE];
+                let n = reframe(rx.last_body(), &mut out).unwrap();
+                forwarded.extend_from_slice(&out[..n]);
+            }
+            Err(_) => garbage.push(String::from_utf8_lossy(rx.last_body()).into_owned()),
+        }
+    }
+    assert_eq!(ok, vec![0, 1]);
+    assert_eq!(garbage, vec!["I (123) boot: hello\r\n".to_string()]);
+
+    // A downstream decoder sees the forwarded frames with src/seq intact.
+    let mut rx2 = RxDecoder::new();
+    let got: Vec<(u8, u16)> = forwarded
+        .into_iter()
+        .filter_map(|b| rx2.feed(b).map(|r| r.map(|(h, _)| (h.src, h.seq)).unwrap()))
+        .collect();
+    assert_eq!(got, vec![(Board::Tx as u8, 0), (Board::Tx as u8, 1)]);
 }

@@ -1,7 +1,6 @@
 # rust
 target/
-firmware/*/target/
-firmware/*/.embuild/
+.embuild/
 # data (keep folder)
 datasets/*
 !datasets/.gitkeep

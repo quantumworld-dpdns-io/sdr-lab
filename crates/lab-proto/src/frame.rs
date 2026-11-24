@@ -123,6 +123,8 @@ pub struct RxDecoder {
     buf: [u8; MAX_WIRE_BODY],
     n: usize,
     overflow: bool,
+    /// Length of the most recently completed body in `buf`.
+    last: usize,
     scratch: [u8; MAX_RAW],
     pub n_ok: u32,
     pub n_err: u32,
@@ -140,6 +142,7 @@ impl RxDecoder {
             buf: [0; MAX_WIRE_BODY],
             n: 0,
             overflow: false,
+            last: 0,
             scratch: [0; MAX_RAW],
             n_ok: 0,
             n_err: 0,
@@ -159,6 +162,7 @@ impl RxDecoder {
             return None;
         }
         let (n, ovf) = (self.n, self.overflow);
+        self.last = n;
         self.n = 0;
         self.overflow = false;
         if n == 0 {
@@ -174,5 +178,13 @@ impl RxDecoder {
             Err(_) => self.n_err += 1,
         }
         Some(r)
+    }
+
+    /// Raw COBS body (delimiter stripped) of the frame or garbage run that the
+    /// last `Some(..)` from [`feed`](Self::feed) reported. Valid until the next
+    /// non-zero byte is fed. Used to forward frames verbatim and to surface
+    /// console text that arrived between frames.
+    pub fn last_body(&self) -> &[u8] {
+        &self.buf[..self.last.min(self.buf.len())]
     }
 }

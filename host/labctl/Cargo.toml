@@ -12,3 +12,4 @@ serde = { workspace = true, features = ["std"] }
 serde_json.workspace = true
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+serialport = { version = "4", default-features = false }

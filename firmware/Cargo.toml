@@ -1,0 +1,27 @@
+# Firmware workspace (esp toolchain). Build from a board directory, e.g.
+#   cd firmware/tx-s3 && cargo build --release
+# Each board dir's .cargo/config.toml selects its target.
+[workspace]
+resolver = "2"
+members = ["lab-fw", "tx-s3", "rx-s3", "controller-esp32"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+lab-proto = { path = "../crates/lab-proto", features = ["std"] }
+lab-core = { path = "../crates/lab-core" }
+lab-fw = { path = "lab-fw" }
+esp-idf-svc = { version = "0.54", features = ["critical-section"] }
+log = "0.4"
+anyhow = "1"
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+debug = true          # symbols only; not flashed
+
+[profile.dev]
+debug = true
+opt-level = "z"

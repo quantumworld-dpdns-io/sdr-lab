@@ -1,0 +1,7 @@
+# Shared by all boards. Board/chip-specific overrides: sdkconfig.defaults.<mcu>
+# 1 ms scheduler tick: trigger polling and link timeouts rely on it.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+# Rust std threads
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192

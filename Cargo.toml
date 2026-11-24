@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lab-proto", "host/labctl"]
+members = ["crates/lab-proto", "crates/lab-core", "host/labctl"]
 # firmware/* are separate cargo projects (esp toolchain, xtensa targets)
 exclude = ["firmware"]
 

@@ -17,8 +17,10 @@ pub mod cobs;
 pub mod crc;
 pub mod frame;
 pub mod limits;
+pub mod link;
 pub mod msg;
 pub mod testframe;
 
 pub use frame::{decode_frame, encode_frame, Error, Header, RxDecoder};
+pub use link::LinkTx;
 pub use msg::*;

@@ -18,4 +18,16 @@ cargo run -p labctl -- encode experiments/exp_rssi_ch6.json
 cargo +esp build -p lab-proto --release --target xtensa-esp32s3-none-elf -Zbuild-std=core
 ```
 
-Firmware (from M1): run `cargo build --release` and then `espflash flash --monitor` inside `firmware/<board>/`. This uses the `esp` toolchain from `espup`.
+## Firmware
+This uses the `esp` toolchain from `espup`. The first build downloads ESP-IDF v5.5.1 into `~/.espressif`.
+```sh
+cd firmware/tx-s3            && cargo run --release   # build + flash + monitor (espflash)
+cd firmware/rx-s3            && cargo run --release
+cd firmware/controller-esp32 && cargo run --release
+```
+Wire the boards as in [`docs/wiring.md`](docs/wiring.md), connect the controller's USB, then:
+```sh
+cargo run -p labctl -- status         # TX / RX / CTRL ready?
+cargo run -p labctl -- sync           # trigger alignment (pass: TX↔RX jitter ≤ 50 µs)
+cargo run -p labctl -- monitor        # live decoded frames
+```

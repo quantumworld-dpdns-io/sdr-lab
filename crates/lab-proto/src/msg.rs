@@ -45,7 +45,7 @@ impl TryFrom<u8> for MsgType {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Board {
     Unknown = 0,
@@ -53,6 +53,30 @@ pub enum Board {
     Rx = 2,
     Ctrl = 3,
     Host = 4,
+}
+
+impl Board {
+    /// Board from a frame header's `src` byte; `None` if out of range.
+    pub fn from_src(v: u8) -> Option<Self> {
+        Some(match v {
+            0 => Board::Unknown,
+            1 => Board::Tx,
+            2 => Board::Rx,
+            3 => Board::Ctrl,
+            4 => Board::Host,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Board::Unknown => "?",
+            Board::Tx => "TX",
+            Board::Rx => "RX",
+            Board::Ctrl => "CTRL",
+            Board::Host => "HOST",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +142,12 @@ pub enum CmdBody {
     Stop,
     Ping,
     StatusReq,
+    /// CTRL fires `pulses` trigger edges `period_ms` apart; every board
+    /// reports each edge as a [`TriggerEvt`]. Used to measure sync quality.
+    SyncTest {
+        pulses: u16,
+        period_ms: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +169,8 @@ pub struct TriggerEvt {
     pub exp_id: u32,
     /// `esp_timer_get_time()` latched at the trigger edge.
     pub t0_local_us: u64,
+    /// Edge counter since boot (lets the host pair edges across boards).
+    pub edge: u32,
 }
 
 /// Ground truth: one per transmitted test frame / advertisement.

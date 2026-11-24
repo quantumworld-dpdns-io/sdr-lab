@@ -43,7 +43,14 @@ The topology is **hybrid**: a standalone 3-board core plus an optional host (Mac
 | ESP32-S3 B (RX) | `rx-s3` | `xtensa-esp32s3-espidf` | Sniffer filtered to the lab MACs, CSI from TX frames, RSSI and the BLE scanner. Validates the replay protection. |
 | ESP32-WROOM-32 (CTRL) | `controller-esp32` | `xtensa-esp32-espidf` | Runs the experiment state machine and aggregates both UART links. Writes the SD dataset and serves the web UI over SoftAP, with the AP off during RUN. Bridges to the host over USB. |
 
-Each firmware crate is its own cargo project, with its own `rust-toolchain.toml` (`channel = "esp"`), `.cargo/config.toml` and `sdkconfig.defaults`. The ESP-IDF version is pinned in `.idf-version` (passed as `ESP_IDF_VERSION`). The projects share code through path dependencies on `crates/`.
+`firmware/` is its own cargo workspace on the `esp` toolchain, separate from the host workspace:
+- `firmware/.cargo/config.toml` holds the shared settings: linkers, `build-std`, `ESP_IDF_VERSION` (matching `.idf-version`) and a global ESP-IDF install under `~/.espressif`.
+- Each board directory's `.cargo/config.toml` selects only its target.
+- `sdkconfig.defaults` is shared by all boards. Per-chip overrides go in `sdkconfig.defaults.<mcu>`.
+- Board logic lives in `crates/lab-core` (`no_std`, host-tested). `firmware/lab-fw` is the thin ESP-IDF layer that does the I/O `lab-core` asks for:
+  - UART `Link` with a reader thread
+  - trigger ISR and output
+  - board identity
 
 ### Wiring
 See [`wiring.md`](wiring.md). In short: CTRL UART1 goes to TX, UART2 goes to RX, GPIO27 is the trigger, the microSD sits on VSPI and all boards share ground.
@@ -55,6 +62,7 @@ The protocol is implemented in `crates/lab-proto` and specified in [`protocol.md
 - **Schema rule:** append-only, because postcard encodes by position. The frozen golden vectors in `crates/lab-proto/tests/golden/` are the wire spec.
 - **Link speed:** UART at 921 600 baud. CSI at about 400 B/frame × 100 Hz fits. Higher rates stream from the RX-S3 over native USB.
 - **Time base:** the CTRL trigger edge defines t0. Each board latches `esp_timer_get_time()` at the edge, and every record carries µs since t0.
+  - Crystal drift (±20 ppm per board) is reported by `labctl sync`. From M2, runs re-pulse periodically so drift can be corrected after the fact.
 
 ### Ground-truth test frame
 The format lives in `lab_proto::testframe`:
@@ -84,14 +92,15 @@ sdr-lab/
 ├── rust-toolchain.toml        # stable (host); firmware crates pin "esp"
 ├── .idf-version
 ├── crates/
-│   ├── lab-proto/             # no_std: framing, messages, limits, testframe   ✅ M0
-│   ├── lab-fw-common/         # std+esp-idf: uart_link, exp_sync, sd_store, wifi/csi/ble wrappers
+│   ├── lab-proto/             # no_std: framing, messages, limits, testframe, link   ✅ M0/M1
+│   ├── lab-core/              # no_std: controller + peer state machines (host-tested) ✅ M1
 │   └── replay-guard/          # no_std: HMAC-SHA256 + monotonic counter window (hmac/sha2)
-├── firmware/
-│   ├── tx-s3/   rx-s3/   controller-esp32/     # esp-idf-svc apps
+├── firmware/                  # separate cargo workspace, esp toolchain
+│   ├── lab-fw/                # esp-idf shell: Link, trigger, board info; later sd_store, wifi/csi/ble ✅ M1
+│   ├── tx-s3/   rx-s3/   controller-esp32/     # esp-idf-svc apps ✅ M1
 │   └── controller-esp32/web/                   # tiny static SPA, gzipped, embedded via include_bytes!
 ├── host/
-│   ├── labctl/                # CLI: validate ✅, encode ✅, status, run, export, monitor
+│   ├── labctl/                # CLI: validate ✅ encode ✅ ports ✅ status ✅ monitor ✅ sync ✅; run, export (M2)
 │   ├── lab-analysis/          # ndarray + rustfft: rssi path-loss, csi amp/phase, motion, anomaly
 │   ├── lab-mcp/               # MCP server (rmcp, stdio), tools from ref.txt
 │   └── lab-sdr/               # IqSource trait; NullIq now, HackRF via soapysdr crate later
@@ -120,7 +129,7 @@ sdr-lab/
 | # | Milestone | Deliverables | Done when |
 |---|---|---|---|
 | **M0 ✅** | Scaffold and protocol | Workspace, `lab-proto` (framing, messages, limits, testframe), golden vectors, `labctl validate/encode`, CI | `cargo test` passes. `lab-proto` builds `no_std` for `xtensa-esp32s3-none-elf` and `xtensa-esp32-none-elf`. Clippy runs with `-D warnings`. |
-| M1 | UART link and sync | `lab-fw-common::{uart_link, exp_sync}`, the three firmware apps with Hello/Status heartbeat, `labctl status` | All three boards show Ready. TX and RX t0 agree within ~50 µs. |
+| **M1** (code done, needs hardware) | UART link and sync | `lab-core` (ctrl + peer), `lab-fw` (Link, trigger), the three firmware apps, `labctl status / monitor / sync` | `labctl status`: all three boards ready. `labctl sync`: TX↔RX residual jitter ≤ 50 µs after the drift fit (drift is reported separately in ppm). |
 | M2 | P0: Wi-Fi TX, sniffer, RSSI, loss | `wifi_tx` (`esp_wifi_80211_tx`), sniffer and MAC filter, `sd_store`, pcap writer, `labctl run` | A 60 s run gives matched seqs, a loss % and an RSSI series. The pcap opens in Wireshark. |
 | M3 | P0: CSI | CSI wrapper and `CsiFrame` streaming (UART/USB), `lab-analysis csi` | Amplitude/phase plots. Static vs. motion runs are clearly different. |
 | M4 | P0: BLE | `esp32-nimble` adv (TX) and scan (RX) | BLE loss and RSSI per run. |

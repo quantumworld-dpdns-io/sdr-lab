@@ -1,0 +1,11 @@
+[package]
+name = "lab-core"
+version = "0.1.0"
+description = "SDR Lab board logic (controller + peer state machines), no_std and host-testable"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lab-proto = { path = "../lab-proto" }
+heapless.workspace = true
