@@ -8,7 +8,7 @@ pub mod ctrl;
 pub mod peer;
 
 use heapless::{String, Vec};
-use lab_proto::{Ack, Msg};
+use lab_proto::{Ack, Msg, SyncMethod};
 
 /// A UART link as seen from the controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,9 +28,21 @@ pub enum Action {
     SendHello(Port),
     /// Send this board's own `Status` (the shell knows heap, uptime).
     SendStatus(Port),
-    /// Fire `pulses` trigger edges, `period_ms` apart (controller only).
+    /// Fire `pulses` trigger edges, `period_ms` apart (trigger master only).
     Pulse {
         pulses: u16,
+        period_ms: u16,
+    },
+    /// Bring the radio into the mode `method` needs, then Ack `cmd_id`
+    /// (the shell sends the Ack once the radio is actually ready).
+    RadioPrepare {
+        cmd_id: u32,
+        method: SyncMethod,
+    },
+    /// Run a wireless sync measurement; the shell emits `SyncEvt`s.
+    RadioRun {
+        method: SyncMethod,
+        events: u16,
         period_ms: u16,
     },
 }
@@ -43,7 +55,7 @@ pub type Actions = Vec<Action, MAX_ACTIONS>;
 /// How often boards emit an unsolicited `Status` heartbeat.
 pub const HEARTBEAT_MS: u64 = 1000;
 
-pub(crate) fn ack(cmd_id: u32, result: Result<(), &str>) -> Msg {
+pub fn ack(cmd_id: u32, result: Result<(), &str>) -> Msg {
     let mut error = String::new();
     if let Err(e) = result {
         // Truncate to capacity rather than fail: an ack must always go out.

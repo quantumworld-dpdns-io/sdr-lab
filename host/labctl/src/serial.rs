@@ -10,7 +10,9 @@ use lab_proto::link::MAX_LINK_WIRE;
 use lab_proto::{Board, Error, Header, LinkTx, Msg, RxDecoder};
 use serialport::{SerialPort, SerialPortType};
 
-pub const BAUD: u32 = 921_600;
+/// Host-side rate for USB-UART bridges (matches firmware HOST_UART_BAUD).
+/// Ignored by native-USB (USB-Serial-JTAG) ports.
+pub const BAUD: u32 = 115_200;
 
 /// USB-UART bridges used on ESP32 devkits (CTRL board).
 const BRIDGE_VIDS: [(u16, &str); 3] = [(0x10C4, "CP210x"), (0x1A86, "CH34x"), (0x0403, "FTDI")];
@@ -51,13 +53,18 @@ impl ConnWriter {
     }
 }
 
-/// All Espressif native-USB ports (ESP32-S3 USB-Serial-JTAG), cu.* only.
-pub fn espressif_ports() -> Result<Vec<String>> {
+/// Candidate lab boards for `labctl hub`: Espressif native USB ports and
+/// USB-UART bridges (a devkit's UART/COM connector), cu.* only. The hub
+/// identifies each one by its Hello, so extra ports are harmless.
+pub fn lab_ports() -> Result<Vec<String>> {
     let mut out: Vec<String> = serialport::available_ports()
         .context("listing serial ports")?
         .into_iter()
         .filter(|p| !p.port_name.starts_with("/dev/tty."))
-        .filter(|p| matches!(&p.port_type, SerialPortType::UsbPort(u) if u.vid == ESPRESSIF_VID))
+        .filter(|p| {
+            matches!(&p.port_type, SerialPortType::UsbPort(u)
+            if u.vid == ESPRESSIF_VID || BRIDGE_VIDS.iter().any(|(v, _)| *v == u.vid))
+        })
         .map(|p| p.port_name)
         .collect();
     out.sort();

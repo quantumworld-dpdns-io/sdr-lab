@@ -9,17 +9,39 @@ use std::time::Duration;
 
 use anyhow::Result;
 use esp_idf_svc::hal::gpio::InputPin;
-use lab_core::{peer::Peer, Action, Actions};
-use lab_proto::{Msg, RunState, TriggerEvt};
+use lab_core::{ack, peer::Peer, Action, Actions};
+use lab_proto::{Msg, RunState, SyncEvt, SyncMethod, TriggerEvt};
 
 use crate::board::BoardInfo;
 use crate::link::{Link, LinkRead};
 use crate::trigger::TriggerOut;
 
+/// A board's wireless sync capability (implemented by `radio::Radio`).
+pub trait RadioOps: Send + 'static {
+    /// Bring the radio into the mode `method` needs. Blocking (seconds).
+    fn prepare(&mut self, method: SyncMethod) -> Result<()>;
+    /// Run a measurement; locally generated events go to `emit`.
+    fn run(
+        &mut self,
+        method: SyncMethod,
+        events: u16,
+        period_ms: u16,
+        emit: &dyn Fn(SyncEvt),
+    ) -> Result<()>;
+    /// Events produced asynchronously (RX callbacks); taken once.
+    fn take_events(&mut self) -> Option<mpsc::Receiver<SyncEvt>>;
+}
+
+enum RadioReq {
+    Prepare { cmd_id: u32, method: SyncMethod },
+    Run { method: SyncMethod, events: u16, period_ms: u16 },
+}
+
 struct Ctx {
     info: BoardInfo,
     link: Arc<Link>,
     pulse: Option<mpsc::SyncSender<(u16, u16)>>,
+    radio: Option<mpsc::SyncSender<RadioReq>>,
 }
 
 impl Ctx {
@@ -42,6 +64,28 @@ impl Ctx {
                     }
                     None => log::warn!("not the trigger master; pulse ignored"),
                 },
+                Action::RadioPrepare { cmd_id, method } => match &self.radio {
+                    Some(r) => {
+                        if r.try_send(RadioReq::Prepare { cmd_id, method }).is_err() {
+                            self.link.send(&ack(cmd_id, Err("radio busy")));
+                        }
+                    }
+                    // No radio is fine for the wired method.
+                    None if method == SyncMethod::Wired => self.link.send(&ack(cmd_id, Ok(()))),
+                    None => self.link.send(&ack(cmd_id, Err("no radio on this board"))),
+                },
+                Action::RadioRun {
+                    method,
+                    events,
+                    period_ms,
+                } => match &self.radio {
+                    Some(r) => {
+                        if r.try_send(RadioReq::Run { method, events, period_ms }).is_err() {
+                            log::warn!("radio busy; sync run dropped");
+                        }
+                    }
+                    None => log::warn!("no radio; sync run ignored"),
+                },
             }
         }
     }
@@ -60,8 +104,13 @@ pub fn run(
     rx: Box<dyn LinkRead>,
     trigger_in: impl InputPin + 'static,
     trigger_out: Option<TriggerOut>,
+    radio: Option<Box<dyn RadioOps>>,
 ) -> Result<()> {
     let master = trigger_out.is_some();
+    let radio = match radio {
+        Some(r) => Some(spawn_radio(r, Arc::clone(&link))?),
+        None => None,
+    };
     let pulse = match trigger_out {
         Some(mut out) => {
             let (tx, prx) = mpsc::sync_channel::<(u16, u16)>(1);
@@ -83,7 +132,12 @@ pub fn run(
         None => None,
     };
 
-    let ctx = Arc::new(Ctx { info, link, pulse });
+    let ctx = Arc::new(Ctx {
+        info,
+        link,
+        pulse,
+        radio,
+    });
     let core = Arc::new(Mutex::new(if master {
         Peer::trigger_master()
     } else {
@@ -125,6 +179,52 @@ pub fn run(
     }
 }
 
+/// Radio worker: owns the radio, serves prepare/run requests, and forwards
+/// asynchronously captured events (RX callbacks) up the link.
+fn spawn_radio(mut radio: Box<dyn RadioOps>, link: Arc<Link>) -> Result<mpsc::SyncSender<RadioReq>> {
+    if let Some(events) = radio.take_events() {
+        let link = Arc::clone(&link);
+        thread::Builder::new()
+            .name("radio-evt".into())
+            .stack_size(crate::THREAD_STACK)
+            .spawn(move || {
+                for e in events {
+                    link.send(&Msg::SyncEvt(e));
+                }
+            })?;
+    }
+    let (tx, rx) = mpsc::sync_channel::<RadioReq>(2);
+    thread::Builder::new()
+        .name("radio".into())
+        // Wi-Fi / Bluedroid bring-up needs a deep stack.
+        .stack_size(16 * 1024)
+        .spawn(move || {
+            for req in rx {
+                match req {
+                    RadioReq::Prepare { cmd_id, method } => {
+                        let r = radio.prepare(method);
+                        if let Err(e) = &r {
+                            log::warn!("radio prepare {method:?}: {e:#}");
+                        }
+                        let err = r.as_ref().err().map(|e| format!("{e:#}"));
+                        link.send(&ack(cmd_id, err.as_deref().map_or(Ok(()), Err)));
+                    }
+                    RadioReq::Run {
+                        method,
+                        events,
+                        period_ms,
+                    } => {
+                        let emit = |e: SyncEvt| link.send(&Msg::SyncEvt(e));
+                        if let Err(e) = radio.run(method, events, period_ms, &emit) {
+                            log::warn!("radio run {method:?}: {e:#}");
+                        }
+                    }
+                }
+            }
+        })?;
+    Ok(tx)
+}
+
 /// UART link to the controller board (default build).
 pub fn uart_link(
     info: &BoardInfo,
@@ -143,4 +243,29 @@ pub fn uart_link(
         &crate::link_uart_config(),
     )?;
     Ok(Link::uart("ctrl", drv, info.board))
+}
+
+/// Host link over UART0, i.e. the devkit's UART/COM USB connector (CH340 /
+/// CP210x bridge). UART0 is also the ESP-IDF console: it is switched to
+/// driver mode so each log write is atomic with respect to frame writes, and
+/// the link's leading 0x00 delimiter keeps log text from corrupting frames.
+pub fn host_uart0_link(
+    info: &BoardInfo,
+    uart0: impl esp_idf_svc::hal::uart::Uart + 'static,
+    tx_pin: impl esp_idf_svc::hal::gpio::OutputPin + 'static,
+    rx_pin: impl InputPin + 'static,
+) -> Result<(Arc<Link>, Box<dyn LinkRead>)> {
+    use esp_idf_svc::hal::gpio::AnyIOPin;
+    use esp_idf_svc::hal::uart::UartDriver;
+    let drv = UartDriver::new(
+        uart0,
+        tx_pin,
+        rx_pin,
+        None::<AnyIOPin>,
+        None::<AnyIOPin>,
+        &crate::host_uart_config(),
+    )?;
+    // SAFETY: the UART0 driver was installed just above.
+    unsafe { esp_idf_svc::sys::uart_vfs_dev_use_driver(0) };
+    Ok(Link::uart("host", drv, info.board))
 }

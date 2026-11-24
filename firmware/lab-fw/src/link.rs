@@ -31,7 +31,11 @@ impl LinkWrite for UartTxDriver<'static> {
 
 impl LinkRead for UartRxDriver<'static> {
     fn read(&mut self, buf: &mut [u8], timeout_ms: u64) -> Result<usize, EspError> {
-        UartRxDriver::read(self, buf, TickType::new_millis(timeout_ms).ticks())
+        match UartRxDriver::read(self, buf, TickType::new_millis(timeout_ms).ticks()) {
+            // esp-idf-hal reports an idle line as ESP_ERR_TIMEOUT, not Ok(0).
+            Err(e) if e.code() == esp_idf_svc::sys::ESP_ERR_TIMEOUT => Ok(0),
+            r => r,
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! Logic shared by the TX and RX boards (M1: liveness + commands).
 
-use lab_proto::{Cmd, CmdBody, Msg};
+use lab_proto::{Cmd, CmdBody, Msg, SyncMethod};
 
 use crate::{ack, push, Action, Actions, Port, HEARTBEAT_MS};
 
@@ -82,6 +82,45 @@ impl Peer {
                     ack(*cmd_id, Err("this board is not the trigger master")),
                 ),
             ),
+            CmdBody::SyncPrepare { method } => push(
+                &mut a,
+                Action::RadioPrepare {
+                    cmd_id: *cmd_id,
+                    method: *method,
+                },
+            ),
+            // The wired method is the existing trigger test.
+            CmdBody::SyncRun {
+                method: SyncMethod::Wired,
+                events,
+                period_ms,
+            } => {
+                return self.on_msg(&Msg::Cmd(Cmd {
+                    cmd_id: *cmd_id,
+                    body: CmdBody::SyncTest {
+                        pulses: *events,
+                        period_ms: *period_ms,
+                    },
+                }))
+            }
+            CmdBody::SyncRun {
+                method,
+                events,
+                period_ms,
+            } => match crate::ctrl::validate_sync(*events, *period_ms) {
+                Ok(()) => {
+                    push(&mut a, Action::Send(Port::Host, ack(*cmd_id, Ok(()))));
+                    push(
+                        &mut a,
+                        Action::RadioRun {
+                            method: *method,
+                            events: *events,
+                            period_ms: *period_ms,
+                        },
+                    );
+                }
+                Err(e) => push(&mut a, Action::Send(Port::Host, ack(*cmd_id, Err(e)))),
+            },
             CmdBody::Configure(_) | CmdBody::Arm | CmdBody::Stop => push(
                 &mut a,
                 Action::Send(Port::Host, ack(*cmd_id, Err("not supported by peer in M1"))),
@@ -156,5 +195,56 @@ mod tests {
         assert!(
             matches!(&Peer::trigger_master().on_msg(&bad)[..], [Action::Send(_, Msg::Ack(x))] if !x.ok)
         );
+    }
+
+    #[test]
+    fn radio_commands_map_to_actions() {
+        let mut p = Peer::new();
+        let prep = Msg::Cmd(Cmd {
+            cmd_id: 5,
+            body: CmdBody::SyncPrepare {
+                method: SyncMethod::Ble,
+            },
+        });
+        assert_eq!(
+            p.on_msg(&prep).as_slice(),
+            [Action::RadioPrepare {
+                cmd_id: 5,
+                method: SyncMethod::Ble
+            }],
+            "prepare is acked by the shell once the radio is ready"
+        );
+        let run = Msg::Cmd(Cmd {
+            cmd_id: 6,
+            body: CmdBody::SyncRun {
+                method: SyncMethod::WifiTsf,
+                events: 20,
+                period_ms: 100,
+            },
+        });
+        let a = p.on_msg(&run);
+        assert!(matches!(&a[0], Action::Send(_, Msg::Ack(x)) if x.ok && x.cmd_id == 6));
+        assert_eq!(
+            a[1],
+            Action::RadioRun {
+                method: SyncMethod::WifiTsf,
+                events: 20,
+                period_ms: 100
+            }
+        );
+        // Wired via SyncRun == SyncTest: only the trigger master accepts it.
+        let wired = Msg::Cmd(Cmd {
+            cmd_id: 7,
+            body: CmdBody::SyncRun {
+                method: SyncMethod::Wired,
+                events: 10,
+                period_ms: 100,
+            },
+        });
+        assert!(matches!(&p.on_msg(&wired)[..], [Action::Send(_, Msg::Ack(x))] if !x.ok));
+        assert!(matches!(
+            &Peer::trigger_master().on_msg(&wired)[1],
+            Action::Pulse { pulses: 10, .. }
+        ));
     }
 }

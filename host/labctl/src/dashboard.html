@@ -128,7 +128,7 @@ async function refresh() {
   try {
     const s = await (await fetch('/api/status')).json();
     for (const b of s.boards) $('card-' + b.board).innerHTML = card(b);
-    const w = [...s.warnings, ...s.unknown_ports.map(p => `${p}: waiting for Hello (is it flashed with --features host-link?)`)];
+    const w = [...s.warnings, ...s.unknown_ports.map(p => `${p}: waiting for Hello (flashed with --features host-link? another app holding the port?)`)];
     $('warnings').innerHTML = w.map(x => `<p class="warn">⚠ ${esc(x)}</p>`).join('');
     $('run').disabled = s.sync_running;
     if (s.last_sync && !window._shownSync) { renderSync(s.last_sync); window._shownSync = true; }

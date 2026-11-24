@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 lab-proto.workspace = true
 lab-core.workspace = true
-lab-fw.workspace = true
+lab-fw = { workspace = true, features = ["radio"] }
 esp-idf-svc.workspace = true
 log.workspace = true
 anyhow.workspace = true
@@ -17,5 +17,8 @@ embuild.workspace = true
 
 [features]
 default = []
-# Link to the Mac over native USB instead of UART to the controller board.
-host-link = ["lab-fw/usb-jtag"]
+# Mac-as-controller mode (`labctl hub`), linked over the devkit's UART/COM
+# USB connector (UART0 via the CH340/CP210x bridge).
+host-link = []
+# Same, but over the native "USB" connector (USB-Serial-JTAG).
+host-link-usb = ["lab-fw/usb-jtag"]

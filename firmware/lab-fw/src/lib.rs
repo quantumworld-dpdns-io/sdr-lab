@@ -6,17 +6,33 @@ pub mod board;
 pub mod led;
 pub mod link;
 pub mod peer;
+#[cfg(feature = "radio")]
+pub mod radio;
 pub mod trigger;
 
 use esp_idf_svc::hal::uart::config::Config as UartConfig;
 use esp_idf_svc::hal::units::Hertz;
 
-/// All inter-board and host links run at this rate (8N1, no flow control).
+/// Board ↔ board UART links (short direct wires): 8N1, no flow control.
 pub const LINK_BAUD: u32 = 921_600;
 
+/// Links to the Mac through a devkit's USB-UART bridge (UART0 / COM port).
+/// macOS's built-in CH34x driver garbles 921 600 baud; 115 200 is reliable
+/// and matches the boot ROM/console rate, so boot logs stay readable too.
+/// High-rate streams (CSI, M3) should use the native USB port instead.
+pub const HOST_UART_BAUD: u32 = 115_200;
+
 pub fn link_uart_config() -> UartConfig {
+    uart_config(LINK_BAUD)
+}
+
+pub fn host_uart_config() -> UartConfig {
+    uart_config(HOST_UART_BAUD)
+}
+
+fn uart_config(baud: u32) -> UartConfig {
     UartConfig::default()
-        .baudrate(Hertz(LINK_BAUD))
+        .baudrate(Hertz(baud))
         // CSI bursts (M3) need headroom; 4 KiB ≈ 44 ms at 921 600 baud.
         .rx_fifo_size(4096)
         .tx_fifo_size(4096)

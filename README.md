@@ -18,6 +18,14 @@ cargo run -p labctl -- encode experiments/exp_rssi_ch6.json
 cargo +esp build -p lab-proto --release --target xtensa-esp32s3-none-elf -Zbuild-std=core
 ```
 
+## Host-link mode: no controller board needed
+The Mac runs the controller logic. Wiring is in [`docs/wiring.md`](docs/wiring.md#host-link-mode-mac-as-controller-no-wroom).
+```sh
+cd firmware/tx-s3 && cargo build --release --features host-link && espflash flash --port <TX port> ../target/xtensa-esp32s3-espidf/release/tx-s3
+cd firmware/rx-s3 && cargo build --release --features host-link && espflash flash --port <RX port> ../target/xtensa-esp32s3-espidf/release/rx-s3
+cargo run --release -p labctl -- hub      # dashboard: http://127.0.0.1:8080/
+```
+
 ## Firmware
 This uses the `esp` toolchain from `espup`. The first build downloads ESP-IDF v5.5.1 into `~/.espressif`.
 ```sh

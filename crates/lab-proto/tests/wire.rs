@@ -202,6 +202,26 @@ fn sample_messages() -> Vec<Msg> {
             addr: [9; 6],
             adv_channel: 38,
         }),
+        Msg::Cmd(Cmd {
+            cmd_id: 8,
+            body: CmdBody::SyncPrepare {
+                method: SyncMethod::WifiTsf,
+            },
+        }),
+        Msg::Cmd(Cmd {
+            cmd_id: 9,
+            body: CmdBody::SyncRun {
+                method: SyncMethod::Ble,
+                events: 20,
+                period_ms: 100,
+            },
+        }),
+        Msg::SyncEvt(SyncEvt {
+            method: SyncMethod::WifiFrame,
+            k: 17,
+            t_us: 123_456_789,
+            phy_us: Some(42),
+        }),
         Msg::Log(Log {
             level: 3,
             tag: s("wifi_csi"),

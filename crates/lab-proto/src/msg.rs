@@ -21,6 +21,7 @@ pub enum MsgType {
     RssiSample = 9,
     BleAdv = 10,
     Log = 11,
+    SyncEvt = 12,
 }
 
 impl TryFrom<u8> for MsgType {
@@ -39,6 +40,7 @@ impl TryFrom<u8> for MsgType {
             9 => RssiSample,
             10 => BleAdv,
             11 => Log,
+            12 => SyncEvt,
             _ => return Err(Error::UnknownType(v)),
         })
     }
@@ -148,6 +150,18 @@ pub enum CmdBody {
         pulses: u16,
         period_ms: u16,
     },
+    /// Bring the radio into the mode `method` needs (Wi-Fi AP/STA, BLE).
+    /// The board Acks only once it is ready, or with the error.
+    SyncPrepare {
+        method: SyncMethod,
+    },
+    /// Run `events` sync events `period_ms` apart with `method`; every board
+    /// reports each event it observes as a [`SyncEvt`].
+    SyncRun {
+        method: SyncMethod,
+        events: u16,
+        period_ms: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +246,33 @@ pub struct BleAdv {
     pub adv_channel: u8,
 }
 
+/// How boards establish a common time reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncMethod {
+    /// Shared GPIO trigger edge, timestamped in an ISR (reference).
+    Wired,
+    /// 802.11 TSF: TX is the AP, RX's TSF follows TX's beacons; events are
+    /// TSF period boundaries.
+    WifiTsf,
+    /// TX broadcasts timestamped ESP-NOW frames; RX timestamps arrival.
+    WifiFrame,
+    /// TX updates BLE advertising data; RX timestamps first reception.
+    Ble,
+}
+
+/// One sync event `k` as observed by one board (non-wired methods).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncEvt {
+    pub method: SyncMethod,
+    /// Event id shared by all boards (TSF boundary index, frame/adv seq).
+    pub k: u32,
+    /// Local `esp_timer` µs when this board observed / emitted the event.
+    pub t_us: u64,
+    /// Radio-captured RX timestamp (µs, Wi-Fi MAC clock), when available.
+    pub phy_us: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Log {
     pub level: u8,
@@ -257,6 +298,7 @@ pub enum Msg {
     RssiSample(RssiSample),
     BleAdv(BleAdv),
     Log(Log),
+    SyncEvt(SyncEvt),
 }
 
 impl Msg {
@@ -273,6 +315,7 @@ impl Msg {
             Msg::RssiSample(_) => MsgType::RssiSample,
             Msg::BleAdv(_) => MsgType::BleAdv,
             Msg::Log(_) => MsgType::Log,
+            Msg::SyncEvt(_) => MsgType::SyncEvt,
         }
     }
 
@@ -290,6 +333,7 @@ impl Msg {
             Msg::RssiSample(m) => postcard::to_slice(m, out),
             Msg::BleAdv(m) => postcard::to_slice(m, out),
             Msg::Log(m) => postcard::to_slice(m, out),
+            Msg::SyncEvt(m) => postcard::to_slice(m, out),
         };
         r.map_err(|_| Error::Postcard)
     }
@@ -310,6 +354,7 @@ impl Msg {
             MsgType::RssiSample => Msg::RssiSample(p(payload)?),
             MsgType::BleAdv => Msg::BleAdv(p(payload)?),
             MsgType::Log => Msg::Log(p(payload)?),
+            MsgType::SyncEvt => Msg::SyncEvt(p(payload)?),
         })
     }
 

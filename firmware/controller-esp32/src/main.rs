@@ -81,6 +81,7 @@ fn uart(
     uart: impl Uart + 'static,
     tx: impl OutputPin + 'static,
     rx: impl InputPin + 'static,
+    config: &esp_idf_svc::hal::uart::config::Config,
 ) -> Result<UartDriver<'static>> {
     Ok(UartDriver::new(
         uart,
@@ -88,7 +89,7 @@ fn uart(
         rx,
         None::<AnyIOPin>,
         None::<AnyIOPin>,
-        &lab_fw::link_uart_config(),
+        config,
     )?)
 }
 
@@ -100,14 +101,14 @@ fn main() -> Result<()> {
     log::set_max_level(log::LevelFilter::Warn);
 
     let p = Peripherals::take()?;
-    let host_uart = uart(p.uart0, p.pins.gpio1, p.pins.gpio3)?;
+    let host_uart = uart(p.uart0, p.pins.gpio1, p.pins.gpio3, &lab_fw::host_uart_config())?;
     // Route console writes through the driver too, so each write is atomic
     // with respect to our frame writes (no mid-frame interleaving).
     // SAFETY: the UART0 driver was installed just above.
     unsafe { esp_idf_svc::sys::uart_vfs_dev_use_driver(0) };
     let (host, host_rx) = Link::uart("host", host_uart, Board::Ctrl);
-    let (tx, tx_rx) = Link::uart("tx", uart(p.uart1, p.pins.gpio25, p.pins.gpio26)?, Board::Ctrl);
-    let (rx, rx_rx) = Link::uart("rx", uart(p.uart2, p.pins.gpio17, p.pins.gpio16)?, Board::Ctrl);
+    let (tx, tx_rx) = Link::uart("tx", uart(p.uart1, p.pins.gpio25, p.pins.gpio26, &lab_fw::link_uart_config())?, Board::Ctrl);
+    let (rx, rx_rx) = Link::uart("rx", uart(p.uart2, p.pins.gpio17, p.pins.gpio16, &lab_fw::link_uart_config())?, Board::Ctrl);
     let mut trigger = TriggerOut::new(p.pins.gpio27)?;
 
     let (pulse_tx, pulse_rx) = mpsc::sync_channel::<(u16, u16)>(1);

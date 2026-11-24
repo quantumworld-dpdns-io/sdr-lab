@@ -173,6 +173,10 @@ impl Controller {
                 Err(e) => reply(&mut a, Err(e)),
             },
             CmdBody::Arm | CmdBody::Stop => reply(&mut a, Err("experiment runs land in M2")),
+            CmdBody::SyncPrepare { .. } | CmdBody::SyncRun { .. } => reply(
+                &mut a,
+                Err("wireless sync runs from the hub; send to TX/RX directly"),
+            ),
         }
         a
     }

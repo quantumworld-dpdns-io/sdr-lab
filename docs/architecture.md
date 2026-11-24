@@ -11,6 +11,13 @@ This is a 2.4 GHz RF security testbed built from two ESP32-S3 boards (TX and RX)
 
 The topology is **hybrid**: a standalone 3-board core plus an optional host (Mac M1 or Raspberry Pi) for analysis, MCP and the future SDR.
 
+**Host-link mode** is a fallback that needs no controller board:
+- The S3 firmware is built with `--features host-link` (or `host-link-usb`).
+- `labctl hub` runs the same `lab_core::ctrl::Controller` on the Mac and serves a dashboard at `http://127.0.0.1:8080/`.
+- TX drives the trigger line.
+
+Board logic, protocol and analysis are identical in both modes. Only the transport and the trigger source change.
+
 ---
 
 ## 1. System architecture

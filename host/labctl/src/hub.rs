@@ -483,12 +483,12 @@ async fn api_sync(State(st): State<AppState>, Json(req): Json<SyncReq>) -> Respo
 
 pub fn run(ports: Vec<String>, listen: SocketAddr) -> Result<()> {
     let ports = if ports.is_empty() {
-        serial::espressif_ports()?
+        serial::lab_ports()?
     } else {
         ports
     };
     if ports.is_empty() {
-        bail!("no ESP32-S3 native-USB ports found (VID 303a). Plug in TX/RX or pass --port.");
+        bail!("no ESP32 USB ports found (Espressif native USB or CH34x/CP210x/FTDI bridge). Plug in TX/RX or pass --port.");
     }
 
     let (hub_tx, hub_rx) = mpsc::channel::<In>();

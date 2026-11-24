@@ -1,0 +1,10 @@
+# ESP32-S3 (TX/RX) — Bluetooth LE via Bluedroid for the BLE sync method.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=y
+CONFIG_BT_CONTROLLER_ENABLED=y
+# Legacy (4.2) advertising/scan APIs; the BLE 5.0 extended API is not used.
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
+# Wi-Fi and BLE are never active together (see lab-fw radio.rs), but the
+# coexistence layer must still be present when both stacks are compiled in.
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
