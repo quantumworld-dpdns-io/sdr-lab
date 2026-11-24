@@ -1,0 +1,10 @@
+# rust
+target/
+firmware/*/target/
+firmware/*/.embuild/
+# data (keep folder)
+datasets/*
+!datasets/.gitkeep
+# local
+.ignore/
+.DS_Store

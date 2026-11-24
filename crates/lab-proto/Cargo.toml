@@ -1,0 +1,20 @@
+[package]
+name = "lab-proto"
+version = "0.1.0"
+description = "SDR Lab link protocol: framing, messages, safety limits (no_std, shared by firmware and host)"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+std = ["serde/std", "postcard/use-std"]
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+heapless.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+serde = { workspace = true, features = ["std"] }

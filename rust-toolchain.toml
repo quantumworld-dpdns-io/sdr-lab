@@ -1,0 +1,4 @@
+# Host workspace (crates/, host/). Firmware projects pin "esp" in their own rust-toolchain.toml.
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]

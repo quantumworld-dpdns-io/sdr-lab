@@ -1,0 +1,14 @@
+{
+  "exp_id": 1,
+  "name": "rssi_ch6_baseline",
+  "mode": "RSSI",
+  "channel": 6,
+  "interval_ms": 100,
+  "duration_s": 60,
+  "tx_power_qdbm": 34,
+  "payload_len": 64,
+  "replay_protect": false,
+  "storage": "microSD",
+  "transport": "UART",
+  "notes": "P0 baseline: TX and RX 1 m apart, line of sight. Repeat at 0.5/1/2/4 m for path-loss fit."
+}
