@@ -4,6 +4,7 @@
 //! `ports`, `status`, `monitor`, `sync`.
 
 mod experiment;
+mod hub;
 mod serial;
 mod sync;
 
@@ -45,6 +46,16 @@ enum Command {
     Monitor {
         #[arg(long)]
         port: Option<String>,
+    },
+    /// Mac-as-controller mode: talk to TX/RX S3 boards over their native USB
+    /// (firmware built with `--features host-link`) and serve a dashboard.
+    Hub {
+        /// Serial ports to use (default: every Espressif native-USB port).
+        #[arg(long = "port")]
+        ports: Vec<String>,
+        /// Dashboard address. Loopback by default; the lab is not a server.
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        listen: std::net::SocketAddr,
     },
     /// Fire trigger pulses and report cross-board timing agreement.
     Sync {
@@ -320,6 +331,7 @@ fn run() -> Result<bool> {
         }
         Command::Status { port, wait } => cmd_status(port.as_deref(), wait),
         Command::Monitor { port } => cmd_monitor(port.as_deref()).map(|_| true),
+        Command::Hub { ports, listen } => hub::run(ports, listen).map(|_| true),
         Command::Sync {
             port,
             pulses,

@@ -10,8 +10,9 @@
 use std::collections::BTreeMap;
 
 use lab_proto::Board;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PairReport {
     pub a: Board,
     pub b: Board,

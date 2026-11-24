@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDR Lab Hub</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #dde1e6;
+    --tx: #2563eb; --rx: #16a34a; --ok: #15803d; --bad: #b91c1c; --warn: #a16207;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --panel: #171b21; --ink: #e6e9ee; --muted: #9aa3ae; --line: #2a3038;
+      --tx: #60a5fa; --rx: #4ade80; --ok: #4ade80; --bad: #f87171; --warn: #facc15; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .board-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .board-name { font-weight: 650; font-size: 17px; }
+  .led { width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
+  .led.on { animation: blink 1s steps(1) infinite; }
+  .tx .led.on { background: var(--tx); } .rx .led.on { background: var(--rx); }
+  @keyframes blink { 50% { opacity: .15; } }
+  .pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 99px; border: 1px solid currentColor; }
+  .pill.ready { color: var(--ok); } .pill.missing { color: var(--bad); } .pill.stale { color: var(--warn); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+  dt { color: var(--muted); } dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+  .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+  input { width: 96px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  button { padding: 7px 16px; border-radius: 6px; border: 0; background: var(--ink); color: var(--panel); font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  .verdict { margin-top: 12px; font-weight: 600; }
+  .verdict.pass { color: var(--ok); } .verdict.fail { color: var(--bad); }
+  .warn { color: var(--warn); font-size: 13px; margin: 0 0 12px; }
+  .log-head { display: flex; align-items: center; gap: 12px; }
+  .log-head label { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .log-head input { width: auto; }
+  #log { height: 320px; overflow: auto; font: 12px/1.5 var(--mono); background: var(--bg); border-radius: 6px; padding: 8px; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+  .l-TX { color: var(--tx); } .l-RX { color: var(--rx); } .l-text { color: var(--muted); } .l-sync { color: var(--warn); }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  code { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SDR Lab Hub</h1>
+    <span class="sub">host-link mode · Mac as controller · <span id="conn">connecting…</span></span>
+  </header>
+  <div id="warnings"></div>
+
+  <div class="grid">
+    <section class="panel tx" id="card-TX"></section>
+    <section class="panel rx" id="card-RX"></section>
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <h2>Trigger sync test</h2>
+    <div class="row">
+      <label>Pulses <input id="pulses" type="number" min="1" max="1000" value="20"></label>
+      <label>Period (ms) <input id="period" type="number" min="10" value="100"></label>
+      <button id="run">Run sync test</button>
+    </div>
+    <div id="sync-out"><p class="hint">TX drives GPIO5 → jumpered to TX GPIO4 and RX GPIO4 (shared GND). Pass when TX↔RX residual jitter ≤ 50 µs.</p></div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="log-head">
+      <h2 style="margin:0">Live frames</h2>
+      <label><input id="hide-hb" type="checkbox" checked> hide heartbeats</label>
+    </div>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mac = (m) => m ? m.map(b => b.toString(16).padStart(2, '0')).join(':') : '–';
+
+function card(b) {
+  const h = b.hello, s = b.status;
+  const state = b.ready ? 'ready' : (h ? 'stale' : 'missing');
+  const age = b.last_seen_ms_ago == null ? '–' : (b.last_seen_ms_ago / 1000).toFixed(1) + ' s ago';
+  return `
+    <div class="board-head">
+      <span class="led ${b.ready ? 'on' : ''}"></span>
+      <span class="board-name">${b.board}</span>
+      <span class="sub">${b.board === 'TX' ? 'signal source' : 'receiver'}</span>
+      <span class="pill ${state}">${state}</span>
+    </div>
+    <dl>
+      <dt>Port</dt><dd>${esc(b.port || '–')}</dd>
+      <dt>MAC</dt><dd>${mac(h && h.mac)}</dd>
+      <dt>Firmware</dt><dd>${h ? esc(h.fw_version + ' (' + h.git_hash + ', ' + h.chip + ')') : '–'}</dd>
+      <dt>Uptime</dt><dd>${s ? (s.uptime_ms / 1000).toFixed(1) + ' s' : '–'}</dd>
+      <dt>Free heap</dt><dd>${s ? Math.round(s.free_heap / 1024) + ' KiB' : '–'}</dd>
+      <dt>Link errors</dt><dd>${s ? s.dropped : '–'}</dd>
+      <dt>Last seen</dt><dd>${age}</dd>
+    </dl>`;
+}
+
+function renderSync(r) {
+  if (!r) return;
+  const rows = (r.pairs || []).map(p => `<tr><td>${p.a}↔${p.b}</td><td>${p.edges}</td>
+    <td>${p.drift_ppm.toFixed(2)}</td><td>${p.jitter_us.toFixed(1)}</td><td>${p.raw_max_us.toFixed(1)}</td></tr>`).join('');
+  const edges = Object.entries(r.edges || {}).map(([b, n]) => `${b} ${n}/${r.pulses}`).join(' · ');
+  $('sync-out').innerHTML = `
+    ${rows ? `<table><thead><tr><th>Pair</th><th>Edges</th><th>Drift (ppm)</th><th>Jitter (µs)</th><th>Raw max (µs)</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+    <p class="hint">${r.pulses} pulses × ${r.period_ms} ms${edges ? ' · edges: ' + edges : ''}. Jitter is the residual after the drift fit.</p>
+    <p class="verdict ${r.pass ? 'pass' : 'fail'}">${esc(r.message)}</p>`;
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    for (const b of s.boards) $('card-' + b.board).innerHTML = card(b);
+    const w = [...s.warnings, ...s.unknown_ports.map(p => `${p}: waiting for Hello (is it flashed with --features host-link?)`)];
+    $('warnings').innerHTML = w.map(x => `<p class="warn">⚠ ${esc(x)}</p>`).join('');
+    $('run').disabled = s.sync_running;
+    if (s.last_sync && !window._shownSync) { renderSync(s.last_sync); window._shownSync = true; }
+    $('conn').textContent = 'hub online';
+  } catch { $('conn').textContent = 'hub offline'; }
+}
+
+$('run').onclick = async () => {
+  $('run').disabled = true;
+  $('sync-out').innerHTML = '<p class="hint">Running…</p>';
+  try {
+    const res = await fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pulses: +$('pulses').value, period_ms: +$('period').value }) });
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('json')) renderSync(await res.json());
+    else $('sync-out').innerHTML = `<p class="verdict fail">${esc(await res.text())}</p>`;
+  } catch (e) { $('sync-out').innerHTML = `<p class="verdict fail">${esc(e)}</p>`; }
+  refresh();
+};
+
+const log = $('log');
+function addLine(cls, text) {
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  const d = document.createElement('div');
+  d.className = cls; d.textContent = text;
+  log.appendChild(d);
+  while (log.childNodes.length > 400) log.removeChild(log.firstChild);
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+const es = new EventSource('/api/events');
+es.onmessage = (e) => {
+  const ev = JSON.parse(e.data);
+  const t = (ev.t / 1000).toFixed(3).padStart(9);
+  if (ev.text) return addLine('l-text', `${t} ${ev.port.split('/').pop()}  ${ev.text}`);
+  if (ev.sync) return addLine('l-sync', `${t} sync: ${ev.sync.message}`);
+  if (ev.sync_started) return addLine('l-sync', `${t} sync test started (${ev.sync_started.pulses} × ${ev.sync_started.period_ms} ms)`);
+  if (ev.error) return addLine('l-text', `${t} ${ev.src} #${ev.seq} undecodable: ${ev.error}`);
+  if (ev.msg) {
+    const [kind, body] = Object.entries(ev.msg)[0];
+    if ($('hide-hb').checked && kind === 'Status') return;
+    addLine('l-' + ev.src, `${t} ${ev.src.padEnd(4)} #${String(ev.seq).padEnd(5)} ${kind} ${JSON.stringify(body)}`);
+  }
+};
+es.onerror = () => { $('conn').textContent = 'hub offline'; };
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
