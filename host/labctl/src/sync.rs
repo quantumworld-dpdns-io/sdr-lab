@@ -1,11 +1,12 @@
-//! Trigger-sync quality from a `SyncTest`: every board timestamps the same
-//! N edges with its own clock. For each board pair we fit
-//! `t_b - t_b0 = (1 + drift) * (t_a - t_a0) + residual` and report:
+//! Sync quality: every board timestamps the same N events with its own
+//! clock. For each board pair we fit (ordinary least squares)
+//! `t_b = offset + (1 + drift) · t_a + residual` and report:
 //!
 //! * `drift_ppm`  – relative crystal error (corrected per run in M2 by
-//!   periodic re-sync pulses);
-//! * `jitter_us`  – max |residual|: the edge-capture alignment error that
-//!   remains after drift correction. This is the M1 acceptance number.
+//!   periodic re-sync);
+//! * `jitter_us`  – max |residual|: worst-case alignment error after drift
+//!   correction. The M1 acceptance number (wired ≤ 50 µs);
+//! * `rms_us`     – RMS residual: the typical alignment error.
 
 use std::collections::BTreeMap;
 
@@ -19,6 +20,8 @@ pub struct PairReport {
     pub edges: usize,
     pub drift_ppm: f64,
     pub jitter_us: f64,
+    /// RMS residual after the fit.
+    pub rms_us: f64,
     /// Max |raw difference| without drift correction, for reference.
     pub raw_max_us: f64,
 }
@@ -52,35 +55,60 @@ pub fn analyze(edges: &BTreeMap<Board, Vec<u64>>, expected: usize) -> Report {
     r
 }
 
+/// Pair two boards' observations by event id `k` (events either board
+/// missed are skipped). `None` if fewer than 3 events match.
+pub fn analyze_keyed(
+    a: Board,
+    ka: &BTreeMap<u32, u64>,
+    b: Board,
+    kb: &BTreeMap<u32, u64>,
+) -> Option<PairReport> {
+    let (ta, tb): (Vec<u64>, Vec<u64>) = ka
+        .iter()
+        .filter_map(|(k, t)| kb.get(k).map(|u| (*t, *u)))
+        .unzip();
+    pair(a, &ta, b, &tb)
+}
+
 fn pair(a: Board, ta: &[u64], b: Board, tb: &[u64]) -> Option<PairReport> {
-    if ta.len() < 3 {
+    let n = ta.len().min(tb.len());
+    if n < 3 {
         return None;
     }
-    let x: Vec<f64> = ta.iter().map(|t| (t - ta[0]) as f64).collect();
-    let d: Vec<f64> = tb
+    // Work relative to the first sample in f64 (avoids u64 underflow and
+    // keeps precision); d = (t_b - t_b0) - (t_a - t_a0).
+    let x: Vec<f64> = ta[..n].iter().map(|t| *t as f64 - ta[0] as f64).collect();
+    let d: Vec<f64> = tb[..n]
         .iter()
         .zip(&x)
-        .map(|(t, xi)| (t - tb[0]) as f64 - xi)
+        .map(|(t, xi)| (*t as f64 - tb[0] as f64) - xi)
         .collect();
-    // Least squares through the origin (both series start at 0): d = k·x.
-    let sxx: f64 = x.iter().map(|v| v * v).sum();
+    // OLS with intercept: d = c + k·x. Anchoring on sample 0 instead would
+    // let one bad first event shift every residual.
+    let nf = n as f64;
+    let (mx, md) = (x.iter().sum::<f64>() / nf, d.iter().sum::<f64>() / nf);
+    let sxx: f64 = x.iter().map(|v| (v - mx).powi(2)).sum();
     let k = if sxx > 0.0 {
-        x.iter().zip(&d).map(|(xi, di)| xi * di).sum::<f64>() / sxx
+        x.iter()
+            .zip(&d)
+            .map(|(xi, di)| (xi - mx) * (di - md))
+            .sum::<f64>()
+            / sxx
     } else {
         0.0
     };
-    let jitter = x
-        .iter()
-        .zip(&d)
-        .map(|(xi, di)| (di - k * xi).abs())
-        .fold(0.0, f64::max);
+    let c = md - k * mx;
+    let res: Vec<f64> = x.iter().zip(&d).map(|(xi, di)| di - c - k * xi).collect();
+    let jitter = res.iter().map(|r| r.abs()).fold(0.0, f64::max);
+    let rms = (res.iter().map(|r| r * r).sum::<f64>() / nf).sqrt();
     let raw = d.iter().map(|v| v.abs()).fold(0.0, f64::max);
     Some(PairReport {
         a,
         b,
-        edges: ta.len(),
+        edges: n,
         drift_ppm: k * 1e6,
         jitter_us: jitter,
+        rms_us: rms,
         raw_max_us: raw,
     })
 }
@@ -129,5 +157,22 @@ mod tests {
         let r = analyze(&m, 3);
         assert_eq!(r.missing, vec![(Board::Rx, 2)]);
         assert!(r.pairs.is_empty());
+    }
+
+    #[test]
+    fn keyed_matching_skips_lost_events() {
+        let mut a = BTreeMap::new();
+        let mut b = BTreeMap::new();
+        for k in 0..20u32 {
+            a.insert(k, 1_000_000 + k as u64 * 100_000);
+            if k % 5 != 3 {
+                // RX lost every 5th frame and runs 10 ppm fast, offset 7 s.
+                b.insert(k, 8_000_000 + (k as f64 * 100_000.0 * (1.0 + 10e-6)) as u64);
+            }
+        }
+        let p = analyze_keyed(Board::Tx, &a, Board::Rx, &b).unwrap();
+        assert_eq!(p.edges, 16);
+        assert!((p.drift_ppm - 10.0).abs() < 0.5, "{p:?}");
+        assert!(p.jitter_us < 1.5 && p.rms_us < 1.0, "{p:?}");
     }
 }
